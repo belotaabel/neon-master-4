@@ -799,6 +799,37 @@ export async function getAdminBots() {
   return result.rows;
 }
 
+export async function fundAllBotWallets(amount: number) {
+  if (!db) throw new Error("DATABASE_URL is not configured");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, 0, 0 FROM users WHERE is_bot = TRUE ON CONFLICT (user_id) DO NOTHING",
+    );
+    const result = await client.query(
+      `WITH funded AS (
+         UPDATE balances b
+         SET player_balance = b.player_balance + $1, updated_at = NOW()
+         FROM users u
+         WHERE b.user_id = u.id AND u.is_bot = TRUE
+         RETURNING b.user_id
+       )
+       INSERT INTO transactions (user_id, type, amount, balance_type, status, external_reference)
+       SELECT user_id, 'bot_funding', $1, 'player', 'approved', $2 || ':' || user_id::text
+       FROM funded`,
+      [amount, `admin-bulk-bot-funding:${Date.now()}`],
+    );
+    await client.query("COMMIT");
+    return { count: result.rowCount ?? 0, amount };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function creditBotWallet(botId: number, amount: number) {
   if (!db) throw new Error("DATABASE_URL is not configured");
   const client = await db.connect();

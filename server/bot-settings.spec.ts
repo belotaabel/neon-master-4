@@ -50,4 +50,12 @@ describe("bot settings admin boundary", () => {
     await handleAdminBotFunding({ params: { botId: "1" }, body: { amount: 0 }, header: (name: string) => name === "x-admin-token" ? token : undefined } as never, response as never, () => undefined);
     expect(response.statusCode).toBe(400);
   });
+
+  it("rejects invalid bulk bot wallet funding amounts", async () => {
+    const { handleAdminBotBulkFunding } = await import("./routes/admin");
+    const token = adminToken();
+    const response = responseFor();
+    await handleAdminBotBulkFunding({ body: { amount: 1_000_001 }, header: (name: string) => name === "x-admin-token" ? token : undefined } as never, response as never, () => undefined);
+    expect(response.statusCode).toBe(400);
+  });
 });
