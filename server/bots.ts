@@ -1,9 +1,10 @@
 import { randomInt } from "node:crypto";
 import type { PoolClient } from "pg";
 import { BOT_ROSTER } from "@shared/api";
-import { BOT_TELEGRAM_ID_BASE, db, getBotSettings, persistSelectedCards } from "./db";
+import { BOT_DEFAULT_BALANCE, BOT_TELEGRAM_ID_BASE, db, getBotSettings, persistSelectedCards } from "./db";
 
 const CARD_PRICE = 10;
+const BOT_SELECTION_INTERVAL_MS = 750;
 
 export { BOT_ROSTER };
 
@@ -35,7 +36,7 @@ async function fundBot(client: PoolClient, userId: number) {
     `INSERT INTO balances (user_id, balance, player_balance, main_balance)
      VALUES ($1, 0, $2, 0)
      ON CONFLICT (user_id) DO NOTHING`,
-    [userId, CARD_PRICE * 2],
+    [userId, BOT_DEFAULT_BALANCE],
   );
   const balance = await client.query(
     "SELECT player_balance, main_balance FROM balances WHERE user_id = $1 FOR UPDATE",
@@ -84,8 +85,10 @@ async function runBotCoordinator(gameId: string) {
       [gameId],
     );
     const existingBots = new Set(existing.rows.map((row) => row.bot_key));
+    const elapsed = Math.max(0, Date.now() - new Date(game.rows[0].selecting_started_at).getTime());
+    const availableBotSlots = Math.min(settings.botCount, Math.floor(elapsed / BOT_SELECTION_INTERVAL_MS) + 1);
     let added = 0;
-    for (let index = 0; index < Math.min(settings.botCount, BOT_ROSTER.length); index += 1) {
+    for (let index = 0; index < Math.min(availableBotSlots, BOT_ROSTER.length); index += 1) {
       const botKey = `global-bot:${index}`;
       if (existingBots.has(botKey)) continue;
       const cards = chooseBotCards(await availableCards(client, gameId));

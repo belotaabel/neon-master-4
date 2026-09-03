@@ -7,7 +7,7 @@ import { handleTelegramWebhook } from "./routes/telegram";
 import { handleMe, handleProfilePhoto } from "./routes/me";
 import { handleCardCatalog, handleGameInfo } from "./routes/game";
 import { handleWallet, handleDeposit, handleWithdrawal } from "./routes/wallet";
-import { handleAdminLogin, handleAdminOverview, handleAdminBonusSettings, handleAdminBonusSettingsUpdate, handleAdminBotFunding, handleAdminBotSettings, handleAdminBotSettingsUpdate, handleAdminBots, handleAdminPlayers, handleAdminPromoCodes, handleAdminPromoCodeCreate, handleAdminBroadcast, handleAdminSimulationStatus, handleAdminSimulationStart, handleAdminSimulationStop, handleAdminSimulationClear } from "./routes/admin";
+import { handleAdminLogin, handleAdminOverview, handleAdminBonusSettings, handleAdminBonusSettingsUpdate, handleAdminBotBulkFunding, handleAdminBotFunding, handleAdminBotSettings, handleAdminBotSettingsUpdate, handleAdminBots, handleAdminPlayers, handleAdminPromoCodes, handleAdminPromoCodeCreate, handleAdminBroadcast, handleAdminSimulationStatus, handleAdminSimulationStart, handleAdminSimulationStop, handleAdminSimulationClear } from "./routes/admin";
 
 export type ServiceMode = "75" | "gateway";
 export const serviceMode: ServiceMode = process.env.SERVICE_MODE === "gateway" ? "gateway" : "75";
@@ -42,7 +42,7 @@ async function proxyBotAdminRequest(req: express.Request, res: express.Response)
         "x-admin-token": req.header("x-admin-token") ?? "",
         "x-telegram-init-data": req.header("x-telegram-init-data") ?? "",
       },
-      body: req.method === "PUT" ? JSON.stringify(req.body ?? {}) : undefined,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : JSON.stringify(req.body ?? {}),
     });
     const body = await response.text();
     res.status(response.status).type(response.headers.get("content-type") ?? "application/json").send(body);
@@ -80,6 +80,7 @@ export function createServer() {
   app.get("/api/admin/bot-settings", serviceMode === "gateway" ? proxyBotAdminRequest : handleAdminBotSettings);
   app.put("/api/admin/bot-settings", serviceMode === "gateway" ? proxyBotAdminRequest : handleAdminBotSettingsUpdate);
   app.get("/api/admin/bots", serviceMode === "gateway" ? proxyBotAdminRequest : handleAdminBots);
+  app.post("/api/admin/bots/fund-all", serviceMode === "gateway" ? proxyBotAdminRequest : handleAdminBotBulkFunding);
   app.post("/api/admin/bots/:botId/fund", serviceMode === "gateway" ? proxyBotAdminRequest : handleAdminBotFunding);
   app.get("/api/admin/players", handleAdminPlayers);
   app.get("/api/admin/promo-codes", handleAdminPromoCodes);

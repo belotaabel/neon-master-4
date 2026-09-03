@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from "pg";
 import { BOT_ROSTER, type BotSettings } from "../shared/api";
 
 export const BOT_TELEGRAM_ID_BASE = 900_000_000_000;
+export const BOT_DEFAULT_BALANCE = 100_000;
 
 export const db = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
@@ -225,6 +226,8 @@ export async function initializeDatabase() {
       if ((error as { code?: string }).code !== "42710" || !statement.includes("ADD CONSTRAINT games_")) throw error;
     }
   }
+  // Transient game state must not survive a deployment and block the next selection round.
+  await db.query("DELETE FROM games WHERE status IN ('selecting', 'finalizing', 'playing')");
   for (const [index, name] of BOT_ROSTER.entries()) {
     await db.query(
       `INSERT INTO users (telegram_id, username, display_name, is_bot, bot_key, updated_at)
@@ -234,10 +237,22 @@ export async function initializeDatabase() {
       [BOT_TELEGRAM_ID_BASE + index, name.toLowerCase(), name, `global-bot:${index}`],
     );
     await db.query(
-      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, 0, 0 FROM users WHERE telegram_id = $1 ON CONFLICT (user_id) DO NOTHING",
-      [BOT_TELEGRAM_ID_BASE + index],
+      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, $2, 0 FROM users WHERE telegram_id = $1 ON CONFLICT (user_id) DO NOTHING",
+      [BOT_TELEGRAM_ID_BASE + index, BOT_DEFAULT_BALANCE],
     );
   }
+  await db.query(
+    `UPDATE balances b
+     SET player_balance = $1, updated_at = NOW()
+     FROM users u
+     WHERE b.user_id = u.id
+       AND u.is_bot = TRUE
+       AND b.balance = 0
+       AND b.player_balance = 0
+       AND b.main_balance = 0
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.user_id = b.user_id)`,
+    [BOT_DEFAULT_BALANCE],
+  );
   void archiveExpiredBingoRounds().catch((error) => {
     console.error("Bingo round retention cleanup failed", error);
   });
@@ -709,7 +724,8 @@ export async function readGameState(gameId: string) {
   const result = await db.query(
     `SELECT g.id, g.status, g.prize_pool, g.called_numbers, g.current_number, g.selecting_started_at,
             COUNT(DISTINCT gc.user_id)::int AS player_count,
-            COUNT(gc.card_number)::int AS card_count
+            COUNT(gc.card_number)::int AS card_count,
+            COALESCE(ARRAY_AGG(gc.card_number - 400) FILTER (WHERE gc.card_number IS NOT NULL), '{}') AS occupied_card_numbers
      FROM games g
      LEFT JOIN game_cards gc ON gc.game_id = g.id
      WHERE g.id = $1
@@ -784,6 +800,37 @@ export async function getAdminBots() {
      ORDER BY u.bot_key`,
   );
   return result.rows;
+}
+
+export async function fundAllBotWallets(amount: number) {
+  if (!db) throw new Error("DATABASE_URL is not configured");
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, 0, 0 FROM users WHERE is_bot = TRUE ON CONFLICT (user_id) DO NOTHING",
+    );
+    const result = await client.query(
+      `WITH funded AS (
+         UPDATE balances b
+         SET player_balance = b.player_balance + $1, updated_at = NOW()
+         FROM users u
+         WHERE b.user_id = u.id AND u.is_bot = TRUE
+         RETURNING b.user_id
+       )
+       INSERT INTO transactions (user_id, type, amount, balance_type, status, external_reference)
+       SELECT user_id, 'bot_funding', $1, 'player', 'approved', $2 || ':' || user_id::text
+       FROM funded`,
+      [amount, `admin-bulk-bot-funding:${Date.now()}`],
+    );
+    await client.query("COMMIT");
+    return { count: result.rowCount ?? 0, amount };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function creditBotWallet(botId: number, amount: number) {

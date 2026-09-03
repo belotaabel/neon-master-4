@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { RequestHandler } from "express";
-import { creditBotWallet, db, createAdminPromoCode, getAdminBots, getAdminOverview, getAdminPlayers, getAdminPromoCodes, getBotSettings, getDepositBonusSettings, updateBotSettings, updateDepositBonusSettings } from "../db";
+import { creditBotWallet, db, createAdminPromoCode, fundAllBotWallets, getAdminBots, getAdminOverview, getAdminPlayers, getAdminPromoCodes, getBotSettings, getDepositBonusSettings, updateBotSettings, updateDepositBonusSettings } from "../db";
 import { getTelegramUser } from "./me";
 import { clearSimulationRun, defaultSimulationConfig, simulationEnabled, simulationRunStatus, startSimulationRun, stopSimulationRun } from "../simulation";
 
@@ -144,6 +144,21 @@ export const handleAdminBots: RequestHandler = async (req, res) => {
   } catch (error) {
     console.error("Admin bot accounts load failed", error);
     res.status(500).json({ error: "Bot accounts unavailable" });
+  }
+};
+
+export const handleAdminBotBulkFunding: RequestHandler = async (req, res) => {
+  if (!requireAdmin(req, res)) return;
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+    res.status(400).json({ error: "Funding amount must be between 0 and 1,000,000 ETB" });
+    return;
+  }
+  try {
+    res.json(await fundAllBotWallets(Math.round(amount * 100) / 100));
+  } catch (error) {
+    console.error("Admin bulk bot funding failed", error);
+    res.status(500).json({ error: "Bot wallets could not be funded" });
   }
 };
 

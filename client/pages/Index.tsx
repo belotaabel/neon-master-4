@@ -33,6 +33,7 @@ type GameState = {
   currentBall: number | null;
   playerCount: number;
   cardCount: number;
+  occupiedCardNumbers: number[];
   prizeAmount: number;
   status: string;
   winners: BingoWinner[];
@@ -563,6 +564,7 @@ export default function Index() {
     socket.on("game:state", (state: GameState) => {
       setGame(state);
       setCurrentCardCount(state.cardCount);
+      setOccupiedCardIds(new Set(state.occupiedCardNumbers.filter((id) => Number.isInteger(id) && id >= 1 && id <= 400 && !selectedRef.current.includes(id))));
       setFinalizing(state.status === "finalizing");
       setPlaying((state.status === "active" || state.status === "complete") && selectedRef.current.length > 0);
       setCalled(new Set(state.calledNumbers));

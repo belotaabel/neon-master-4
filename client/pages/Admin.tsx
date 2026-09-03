@@ -161,22 +161,33 @@ function BotSettingsPanel({ headers }: { headers: Record<string, string> }) {
   const [bots, setBots] = useState<AdminBotAccount[]>([]);
   const [fundAmounts, setFundAmounts] = useState<Record<number, string>>({});
   const [fundingId, setFundingId] = useState<number | null>(null);
+  const [bulkFundAmount, setBulkFundAmount] = useState("100000");
+  const [bulkFunding, setBulkFunding] = useState(false);
+  const [bulkFundedCount, setBulkFundedCount] = useState<number | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/bot-settings", { headers })
-      .then((response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Bot settings unavailable");
+        return data;
+      })
       .then((data) => {
-        if (!data || typeof data.enabled !== "boolean") return;
+        if (typeof data.enabled !== "boolean") throw new Error("Bot settings unavailable");
         const next = { enabled: data.enabled, botCount: Number(data.botCount) } satisfies BotSettings;
         setSettings(next);
         setBotCount(String(next.botCount));
       })
-      .catch(() => setError("Bot settings unavailable"))
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Bot settings unavailable"))
       .finally(() => setLoading(false));
     fetch("/api/admin/bots", { headers })
-      .then((response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Bot accounts unavailable");
+        return data;
+      })
       .then((data) => { if (Array.isArray(data)) setBots(data as AdminBotAccount[]); })
-      .catch(() => setError("Bot accounts unavailable"));
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Bot accounts unavailable"));
   }, []);
 
   const save = async (event: FormEvent) => {
@@ -199,6 +210,23 @@ function BotSettingsPanel({ headers }: { headers: Record<string, string> }) {
     setSaved(true);
   };
 
+  const fundAllWallets = async () => {
+    const amount = Number(bulkFundAmount);
+    setError("");
+    setBulkFundedCount(null);
+    if (!Number.isFinite(amount) || amount <= 0) { setError("የመሙያ መጠን ከ0 በላይ ይሁን"); return; }
+    const normalizedAmount = Math.round(amount * 100) / 100;
+    setBulkFunding(true);
+    try {
+      const response = await fetch("/api/admin/bots/fund-all", { method: "POST", headers, body: JSON.stringify({ amount: normalizedAmount }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Bot wallets could not be funded");
+      setBots((current) => current.map((bot) => ({ ...bot, player_balance: Number(bot.player_balance) + normalizedAmount, balance: Number(bot.balance) + normalizedAmount })));
+      setBulkFundedCount(Number(data.count));
+    } catch (fundingError) { setError(fundingError instanceof Error ? fundingError.message : "Bot wallets could not be funded"); }
+    finally { setBulkFunding(false); }
+  };
+
   const fundWallet = async (botId: number) => {
     const amount = Number(fundAmounts[botId]);
     setError("");
@@ -214,7 +242,7 @@ function BotSettingsPanel({ headers }: { headers: Record<string, string> }) {
     finally { setFundingId(null); }
   };
 
-  return <div className="admin-section-page"><div className="admin-page-heading"><div><p className="admin-eyebrow">LIVE GAME CONTROL</p><h1>ቦት ቁጥጥር</h1><p className="admin-subtitle">በቀጥታ 75-ball ጨዋታ ውስጥ የሚገቡ ቦቶችን ያስተዳድሩ።</p></div><div className={`admin-bot-status ${settings.enabled ? "" : "is-off"}`}><span /> {settings.enabled ? "Bots ON" : "Bots OFF"}</div></div><form className="admin-panel bot-settings-panel" onSubmit={save}><div className="admin-panel-heading"><div><h2>የቀጥታ ቦት ተሳትፎ</h2><p>OFF ሲደረግ አዲስ ጨዋታ ላይ አዲስ ቦት አይገባም፤ ያለው ጨዋታ ግን ይቀጥላል።</p></div><Bot size={22} className="panel-gold-icon" /></div><div className="bot-settings-controls"><label className="bot-switch-row"><span><strong>ቦቶችን አብራ</strong><small>{settings.enabled ? "ቦቶች ወደ አዲስ ጨዋታ ይገባሉ" : "ቦቶች አይገቡም"}</small></span><button type="button" role="switch" aria-label="Toggle live bots" aria-checked={settings.enabled} className={`bot-switch ${settings.enabled ? "on" : ""}`} onClick={() => { setSettings((current) => ({ ...current, enabled: !current.enabled })); setSaved(false); }}><span /></button></label><label className="bot-count-field">ወደ ጨዋታ የሚገቡ ቦቶች<small>ከ 0 እስከ 50</small><input type="number" min="0" max="50" step="1" value={botCount} onChange={(event) => { setBotCount(event.target.value); setSaved(false); }} disabled={loading} /></label></div><div className="bot-settings-summary"><strong>{settings.enabled ? `${botCount || 0} bots ready` : "Bots are paused"}</strong><span>በአጠቃላይ {BOT_ROSTER.length} የተዘጋጁ ቦት ስሞች አሉ።</span><button type="submit" className="admin-primary-button" disabled={loading}><Save size={15} /> ቅንብሩን አስቀምጥ</button></div>{saved && <div className="admin-success"><CircleCheck size={16} /> የቦት ቅንብር ተቀምጧል</div>}{error && <div className="admin-error"><X size={16} /> {error}</div>}</form><section className="admin-panel bot-roster-panel"><div className="admin-panel-heading"><div><h2>የቦቶች ዝርዝር</h2><p>የተዘጋጀው ዝርዝር ከዚህ ማስተካከል አይቻልም።</p></div><span className="admin-draft-badge">{BOT_ROSTER.length} NAMES</span></div><div className="bot-roster-grid">{BOT_ROSTER.map((name, index) => <span key={name}><i>{String(index + 1).padStart(2, "0")}</i>{name}</span>)}</div></section><section className="admin-panel bot-wallet-panel"><div className="admin-panel-heading"><div><h2>የቦቶች ፕሮፋይል እና ዋሌት</h2><p>እያንዳንዱ bot የራሱ የplayer balance እና የtransaction history አለው።</p></div><WalletCards size={22} className="panel-gold-icon" /></div><div className="bot-wallet-list">{bots.length ? bots.map((bot) => <article className="bot-wallet-row" key={bot.id}><div className="bot-wallet-identity"><span><Bot size={17} /></span><div><strong>{bot.name}</strong><small>@{bot.handle} · ID {bot.id}</small></div></div><div className="bot-wallet-stats"><span>Player wallet<strong>{Number(bot.player_balance).toLocaleString()} ብር</strong></span><span>Main balance<strong>{Number(bot.main_balance).toLocaleString()} ብር</strong></span><span>Games<strong>{Number(bot.games).toLocaleString()}</strong></span><span>Cards<strong>{Number(bot.card_count).toLocaleString()}</strong></span></div><div className="bot-fund-control"><input aria-label={`Fund ${bot.name} wallet`} type="number" min="1" max="1000000" step="0.01" placeholder="Amount" value={fundAmounts[bot.id] ?? ""} onChange={(event) => setFundAmounts((current) => ({ ...current, [bot.id]: event.target.value }))} /><button type="button" className="admin-outline-button" disabled={fundingId === bot.id} onClick={() => void fundWallet(bot.id)}>{fundingId === bot.id ? "Saving..." : "Fund wallet"}</button></div></article>) : <p className="admin-empty-state">Bot profiles are being provisioned.</p>}</div></section></div>;
+  return <div className="admin-section-page"><div className="admin-page-heading"><div><p className="admin-eyebrow">LIVE GAME CONTROL</p><h1>ቦት ቁጥጥር</h1><p className="admin-subtitle">በቀጥታ 75-ball ጨዋታ ውስጥ የሚገቡ ቦቶችን ያስተዳድሩ።</p></div><div className={`admin-bot-status ${settings.enabled ? "" : "is-off"}`}><span /> {settings.enabled ? "Bots ON" : "Bots OFF"}</div></div><form className="admin-panel bot-settings-panel" onSubmit={save}><div className="admin-panel-heading"><div><h2>የቀጥታ ቦት ተሳትፎ</h2><p>OFF ሲደረግ አዲስ ጨዋታ ላይ አዲስ ቦት አይገባም፤ ያለው ጨዋታ ግን ይቀጥላል።</p></div><Bot size={22} className="panel-gold-icon" /></div><div className="bot-settings-controls"><label className="bot-switch-row"><span><strong>ቦቶችን አብራ</strong><small>{settings.enabled ? "ቦቶች ወደ አዲስ ጨዋታ ይገባሉ" : "ቦቶች አይገቡም"}</small></span><button type="button" role="switch" aria-label="Toggle live bots" aria-checked={settings.enabled} className={`bot-switch ${settings.enabled ? "on" : ""}`} onClick={() => { setSettings((current) => ({ ...current, enabled: !current.enabled })); setSaved(false); }}><span /></button></label><label className="bot-count-field">ወደ ጨዋታ የሚገቡ ቦቶች<small>ከ 0 እስከ 50</small><input type="number" min="0" max="50" step="1" value={botCount} onChange={(event) => { setBotCount(event.target.value); setSaved(false); }} disabled={loading} /></label></div><div className="bot-settings-controls"><label className="bot-count-field">ለሁሉም ቦቶች ባላንስ ጨምር<small>በእያንዳንዱ bot wallet ላይ የሚጨመር መጠን</small><input type="number" min="0.01" max="1000000" step="0.01" value={bulkFundAmount} onChange={(event) => { setBulkFundAmount(event.target.value); setBulkFundedCount(null); }} disabled={bulkFunding} /></label><button type="button" className="admin-primary-button" onClick={() => void fundAllWallets()} disabled={bulkFunding}>{bulkFunding ? "በመጨመር ላይ..." : "ለሁሉም ቦቶች ጨምር"}</button></div>{bulkFundedCount !== null && <div className="admin-success"><CircleCheck size={16} /> {bulkFundedCount} ቦቶች ላይ ባላንስ ተጨምሯል</div>}<div className="bot-settings-summary"><strong>{settings.enabled ? `${botCount || 0} bots ready` : "Bots are paused"}</strong><span>በአጠቃላይ {BOT_ROSTER.length} የተዘጋጁ ቦት ስሞች አሉ።</span><button type="submit" className="admin-primary-button" disabled={loading}><Save size={15} /> ቅንብሩን አስቀምጥ</button></div>{saved && <div className="admin-success"><CircleCheck size={16} /> የቦት ቅንብር ተቀምጧል</div>}{error && <div className="admin-error"><X size={16} /> {error}</div>}</form><section className="admin-panel bot-roster-panel"><div className="admin-panel-heading"><div><h2>የቦቶች ዝርዝር</h2><p>የተዘጋጀው ዝርዝር ከዚህ ማስተካከል አይቻልም።</p></div><span className="admin-draft-badge">{BOT_ROSTER.length} NAMES</span></div><div className="bot-roster-grid">{BOT_ROSTER.map((name, index) => <span key={name}><i>{String(index + 1).padStart(2, "0")}</i>{name}</span>)}</div></section><section className="admin-panel bot-wallet-panel"><div className="admin-panel-heading"><div><h2>የቦቶች ፕሮፋይል እና ዋሌት</h2><p>እያንዳንዱ bot የራሱ የplayer balance እና የtransaction history አለው።</p></div><WalletCards size={22} className="panel-gold-icon" /></div><div className="bot-wallet-list">{bots.length ? bots.map((bot) => <article className="bot-wallet-row" key={bot.id}><div className="bot-wallet-identity"><span><Bot size={17} /></span><div><strong>{bot.name}</strong><small>@{bot.handle} · ID {bot.id}</small></div></div><div className="bot-wallet-stats"><span>Player wallet<strong>{Number(bot.player_balance).toLocaleString()} ብር</strong></span><span>Main balance<strong>{Number(bot.main_balance).toLocaleString()} ብር</strong></span><span>Games<strong>{Number(bot.games).toLocaleString()}</strong></span><span>Cards<strong>{Number(bot.card_count).toLocaleString()}</strong></span></div><div className="bot-fund-control"><input aria-label={`Fund ${bot.name} wallet`} type="number" min="1" max="1000000" step="0.01" placeholder="Amount" value={fundAmounts[bot.id] ?? ""} onChange={(event) => setFundAmounts((current) => ({ ...current, [bot.id]: event.target.value }))} /><button type="button" className="admin-outline-button" disabled={fundingId === bot.id} onClick={() => void fundWallet(bot.id)}>{fundingId === bot.id ? "Saving..." : "Fund wallet"}</button></div></article>) : <p className="admin-empty-state">Bot profiles are being provisioned.</p>}</div></section></div>;
 }
 
 function formatActivity(activity: AdminActivity) {
@@ -325,8 +353,8 @@ function SimulationPanel({ headers }: { headers: Record<string, string> }) {
   return <div className="admin-section-page"><div className="admin-page-heading"><div><p className="admin-eyebrow">STAGING ONLY</p><h1>Full-flow player simulator</h1><p className="admin-subtitle">Fake players use isolated wallets and the same card, game, release, call, and prize flow. Production data is never used.</p></div><div className={`admin-simulation-badge ${status?.enabled ? "enabled" : "disabled"}`}><span />{status?.enabled ? "Staging enabled" : "Disabled"}</div></div>{!status?.enabled ? <article className="admin-panel admin-simulation-warning"><ShieldCheck size={22} /><div><strong>Simulator is unavailable</strong><p>Set the staging-only simulation flag, database, and token on the staging service. This control is rejected outside staging.</p></div></article> : <><form className="admin-panel admin-simulation-form" onSubmit={(event) => { event.preventDefault(); void action("/api/admin/simulation/start", config); }}><div className="admin-panel-heading"><div><h2>Start a deterministic run</h2><p>Use a separate staging database and fake ETB balances.</p></div><span className="admin-draft-badge">QA</span></div><div className="admin-simulation-fields"><label>Players<input type="number" min="1" max="100" value={config.playerCount} onChange={(event) => update("playerCount", Number(event.target.value))} /></label><label>Fake wallet<input type="number" min="10" step="0.01" value={config.initialBalance} onChange={(event) => update("initialBalance", Number(event.target.value))} /></label><label>Selection seconds<input type="number" min="4" max="300" value={config.selectionSeconds} onChange={(event) => update("selectionSeconds", Number(event.target.value))} /></label><label>Call interval ms<input type="number" min="100" value={config.callIntervalMs} onChange={(event) => update("callIntervalMs", Number(event.target.value))} /></label><label>Release chance<input type="number" min="0" max="1" step="0.05" value={config.releaseProbability} onChange={(event) => update("releaseProbability", Number(event.target.value))} /></label><label>Seed<input type="number" value={config.seed} onChange={(event) => update("seed", Number(event.target.value))} /></label></div><label className="admin-simulation-checkbox"><input type="checkbox" checked={config.remainThroughRound} onChange={(event) => update("remainThroughRound", event.target.checked)} /> Keep simulated players connected through the round</label><div className="admin-simulation-actions"><button type="submit" className="admin-primary-button" disabled={busy || Boolean(run)}><Play size={15} /> Start run</button><button type="button" className="admin-outline-button" disabled={busy || !run} onClick={() => void action("/api/admin/simulation/stop", { runId: run?.id })}><Square size={15} /> Stop</button><button type="button" className="admin-outline-button danger" disabled={busy || !run} onClick={() => void action("/api/admin/simulation/clear", { runId: run?.id })}><Trash2 size={15} /> Clear run</button><button type="button" className="admin-outline-button" disabled={busy} onClick={() => void load()}><RefreshCw size={15} /> Refresh</button></div></form>{error && <div className="admin-error"><X size={16} /> {error}</div>}{run && <article className="admin-panel admin-simulation-status"><div className="admin-panel-heading"><div><h2>Run {run.id.slice(0, 8)}</h2><p>Started {new Date(run.createdAt).toLocaleString()} · {run.status}</p></div><span className="admin-live-label">{run.status.toUpperCase()}</span></div><div className="admin-simulation-metrics"><span><b>{run.playerCount}</b> players</span><span><b>{run.cardCount}</b> held cards</span><span><b>{run.config.initialBalance.toLocaleString()}</b> ETB seed</span></div><div className="admin-simulation-player-list">{run.players.map((player) => <div key={player.id}><span>{player.name}</span><b>{player.cardCount} cards</b><strong>{player.balance.toFixed(2)} ETB</strong></div>)}</div></article>}</>}</div>;
 }
 
-export default function Admin() {
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+export default function Admin({ initialTab = "overview" }: { initialTab?: AdminTab }) {
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [menuOpen, setMenuOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [imageData, setImageData] = useState("");
