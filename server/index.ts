@@ -42,7 +42,7 @@ async function proxyBotAdminRequest(req: express.Request, res: express.Response)
         "x-admin-token": req.header("x-admin-token") ?? "",
         "x-telegram-init-data": req.header("x-telegram-init-data") ?? "",
       },
-      body: req.method === "PUT" ? JSON.stringify(req.body ?? {}) : undefined,
+      body: req.method === "GET" || req.method === "HEAD" ? undefined : JSON.stringify(req.body ?? {}),
     });
     const body = await response.text();
     res.status(response.status).type(response.headers.get("content-type") ?? "application/json").send(body);

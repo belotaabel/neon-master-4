@@ -164,19 +164,27 @@ function BotSettingsPanel({ headers }: { headers: Record<string, string> }) {
 
   useEffect(() => {
     fetch("/api/admin/bot-settings", { headers })
-      .then((response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Bot settings unavailable");
+        return data;
+      })
       .then((data) => {
-        if (!data || typeof data.enabled !== "boolean") return;
+        if (typeof data.enabled !== "boolean") throw new Error("Bot settings unavailable");
         const next = { enabled: data.enabled, botCount: Number(data.botCount) } satisfies BotSettings;
         setSettings(next);
         setBotCount(String(next.botCount));
       })
-      .catch(() => setError("Bot settings unavailable"))
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Bot settings unavailable"))
       .finally(() => setLoading(false));
     fetch("/api/admin/bots", { headers })
-      .then((response) => response.ok ? response.json() : null)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Bot accounts unavailable");
+        return data;
+      })
       .then((data) => { if (Array.isArray(data)) setBots(data as AdminBotAccount[]); })
-      .catch(() => setError("Bot accounts unavailable"));
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Bot accounts unavailable"));
   }, []);
 
   const save = async (event: FormEvent) => {
@@ -325,8 +333,8 @@ function SimulationPanel({ headers }: { headers: Record<string, string> }) {
   return <div className="admin-section-page"><div className="admin-page-heading"><div><p className="admin-eyebrow">STAGING ONLY</p><h1>Full-flow player simulator</h1><p className="admin-subtitle">Fake players use isolated wallets and the same card, game, release, call, and prize flow. Production data is never used.</p></div><div className={`admin-simulation-badge ${status?.enabled ? "enabled" : "disabled"}`}><span />{status?.enabled ? "Staging enabled" : "Disabled"}</div></div>{!status?.enabled ? <article className="admin-panel admin-simulation-warning"><ShieldCheck size={22} /><div><strong>Simulator is unavailable</strong><p>Set the staging-only simulation flag, database, and token on the staging service. This control is rejected outside staging.</p></div></article> : <><form className="admin-panel admin-simulation-form" onSubmit={(event) => { event.preventDefault(); void action("/api/admin/simulation/start", config); }}><div className="admin-panel-heading"><div><h2>Start a deterministic run</h2><p>Use a separate staging database and fake ETB balances.</p></div><span className="admin-draft-badge">QA</span></div><div className="admin-simulation-fields"><label>Players<input type="number" min="1" max="100" value={config.playerCount} onChange={(event) => update("playerCount", Number(event.target.value))} /></label><label>Fake wallet<input type="number" min="10" step="0.01" value={config.initialBalance} onChange={(event) => update("initialBalance", Number(event.target.value))} /></label><label>Selection seconds<input type="number" min="4" max="300" value={config.selectionSeconds} onChange={(event) => update("selectionSeconds", Number(event.target.value))} /></label><label>Call interval ms<input type="number" min="100" value={config.callIntervalMs} onChange={(event) => update("callIntervalMs", Number(event.target.value))} /></label><label>Release chance<input type="number" min="0" max="1" step="0.05" value={config.releaseProbability} onChange={(event) => update("releaseProbability", Number(event.target.value))} /></label><label>Seed<input type="number" value={config.seed} onChange={(event) => update("seed", Number(event.target.value))} /></label></div><label className="admin-simulation-checkbox"><input type="checkbox" checked={config.remainThroughRound} onChange={(event) => update("remainThroughRound", event.target.checked)} /> Keep simulated players connected through the round</label><div className="admin-simulation-actions"><button type="submit" className="admin-primary-button" disabled={busy || Boolean(run)}><Play size={15} /> Start run</button><button type="button" className="admin-outline-button" disabled={busy || !run} onClick={() => void action("/api/admin/simulation/stop", { runId: run?.id })}><Square size={15} /> Stop</button><button type="button" className="admin-outline-button danger" disabled={busy || !run} onClick={() => void action("/api/admin/simulation/clear", { runId: run?.id })}><Trash2 size={15} /> Clear run</button><button type="button" className="admin-outline-button" disabled={busy} onClick={() => void load()}><RefreshCw size={15} /> Refresh</button></div></form>{error && <div className="admin-error"><X size={16} /> {error}</div>}{run && <article className="admin-panel admin-simulation-status"><div className="admin-panel-heading"><div><h2>Run {run.id.slice(0, 8)}</h2><p>Started {new Date(run.createdAt).toLocaleString()} · {run.status}</p></div><span className="admin-live-label">{run.status.toUpperCase()}</span></div><div className="admin-simulation-metrics"><span><b>{run.playerCount}</b> players</span><span><b>{run.cardCount}</b> held cards</span><span><b>{run.config.initialBalance.toLocaleString()}</b> ETB seed</span></div><div className="admin-simulation-player-list">{run.players.map((player) => <div key={player.id}><span>{player.name}</span><b>{player.cardCount} cards</b><strong>{player.balance.toFixed(2)} ETB</strong></div>)}</div></article>}</>}</div>;
 }
 
-export default function Admin() {
-  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+export default function Admin({ initialTab = "overview" }: { initialTab?: AdminTab }) {
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [menuOpen, setMenuOpen] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [imageData, setImageData] = useState("");
