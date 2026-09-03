@@ -57,7 +57,10 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
       const liveGame = await getActiveGame();
       const liveGameId = String(liveGame.id);
       activeGames.set(gameType, liveGameId);
-      if (liveGame.status === "selecting") await ensureBotsForSelectingGame(liveGameId);
+      if (liveGame.status === "selecting") {
+        const addedBots = await ensureBotsForSelectingGame(liveGameId);
+        if (addedBots > 0) await broadcastState(gameType);
+      }
       const transition = await advanceSelectingGame();
       if (transition?.started && transition.gameId === activeGames.get(gameType)) {
         await broadcastState(gameType);
