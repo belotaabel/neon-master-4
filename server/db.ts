@@ -226,6 +226,8 @@ export async function initializeDatabase() {
       if ((error as { code?: string }).code !== "42710" || !statement.includes("ADD CONSTRAINT games_")) throw error;
     }
   }
+  // Transient game state must not survive a deployment and block the next selection round.
+  await db.query("DELETE FROM games WHERE status IN ('selecting', 'finalizing', 'playing')");
   for (const [index, name] of BOT_ROSTER.entries()) {
     await db.query(
       `INSERT INTO users (telegram_id, username, display_name, is_bot, bot_key, updated_at)
