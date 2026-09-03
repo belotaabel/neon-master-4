@@ -50,6 +50,21 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
     if (row) io.to(roomFor(gameType, gameId)).emit("game:state", toGameState(row));
   };
 
+  function scheduleFinalizing(gameType: GameType, gameId: string) {
+    if (finalizingTimers.has(gameType)) return;
+    const timer = setTimeout(() => {
+      finalizingTimers.delete(gameType);
+      void (async () => {
+        if (await startFinalizingGame(gameId)) {
+          io.to(roomFor(gameType, gameId)).emit("game:announcement", { message: "Game started" });
+          await broadcastState(gameType);
+          await advanceMode(gameType);
+        }
+      })().catch((error) => console.error("Unable to start finalized game", error));
+    }, 3000);
+    finalizingTimers.set(gameType, timer);
+  }
+
   const advanceMode = async (gameType: GameType) => {
     if (tickInProgress.has(gameType)) return;
     tickInProgress.add(gameType);
@@ -57,6 +72,11 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
       const liveGame = await getActiveGame();
       const liveGameId = String(liveGame.id);
       activeGames.set(gameType, liveGameId);
+      if (liveGame.status === "finalizing") {
+        await broadcastState(gameType);
+        scheduleFinalizing(gameType, liveGameId);
+        return;
+      }
       if (liveGame.status === "selecting") {
         const addedBots = await ensureBotsForSelectingGame(liveGameId);
         if (addedBots > 0) await broadcastState(gameType);
@@ -64,20 +84,7 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
       const transition = await advanceSelectingGame();
       if (transition?.started && transition.gameId === activeGames.get(gameType)) {
         await broadcastState(gameType);
-        if (transition.finalizing && !finalizingTimers.has(gameType)) {
-          const gameId = transition.gameId;
-          const timer = setTimeout(() => {
-            finalizingTimers.delete(gameType);
-            void (async () => {
-              if (await startFinalizingGame(gameId)) {
-                io.to(roomFor(gameType, gameId)).emit("game:announcement", { message: "Game started" });
-                await broadcastState(gameType);
-                await advanceMode(gameType);
-              }
-            })().catch((error) => console.error("Unable to start finalized game", error));
-          }, 3000);
-          finalizingTimers.set(gameType, timer);
-        }
+        if (transition.finalizing) scheduleFinalizing(gameType, transition.gameId);
         return;
       }
       const gameId = activeGames.get(gameType);
