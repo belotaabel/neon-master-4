@@ -52,8 +52,9 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
   };
 
   const finishFinalizingGame = async (gameType: GameType, gameId: string) => {
-    if (!await startFinalizingGame(gameId)) return;
-    io.to(roomFor(gameType, gameId)).emit("game:announcement", { message: "Game started" });
+    if (await startFinalizingGame(gameId)) {
+      io.to(roomFor(gameType, gameId)).emit("game:announcement", { message: "Game started" });
+    }
     await broadcastState(gameType);
   };
 
@@ -66,17 +67,14 @@ export function registerGameSockets(io: Server, serviceMode: GameType = "75") {
       activeGames.set(gameType, liveGameId);
       if (liveGame.status === "finalizing") {
         await finishFinalizingGame(gameType, liveGameId);
-        return;
-      }
-      if (liveGame.status === "selecting") {
+      } else if (liveGame.status === "selecting") {
         const addedBots = await ensureBotsForSelectingGame(liveGameId);
         if (addedBots > 0) await broadcastState(gameType);
       }
-      const transition = await advanceSelectingGame();
+      const transition = liveGame.status === "selecting" ? await advanceSelectingGame() : null;
       if (transition?.started && transition.gameId === activeGames.get(gameType)) {
         await broadcastState(gameType);
         if (transition.finalizing) await finishFinalizingGame(gameType, transition.gameId);
-        return;
       }
       const gameId = activeGames.get(gameType);
       if (!gameId) return;
