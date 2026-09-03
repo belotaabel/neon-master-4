@@ -724,7 +724,8 @@ export async function readGameState(gameId: string) {
   const result = await db.query(
     `SELECT g.id, g.status, g.prize_pool, g.called_numbers, g.current_number, g.selecting_started_at,
             COUNT(DISTINCT gc.user_id)::int AS player_count,
-            COUNT(gc.card_number)::int AS card_count
+            COUNT(gc.card_number)::int AS card_count,
+            COALESCE(ARRAY_AGG(gc.card_number - 400) FILTER (WHERE gc.card_number IS NOT NULL), '{}') AS occupied_card_numbers
      FROM games g
      LEFT JOIN game_cards gc ON gc.game_id = g.id
      WHERE g.id = $1

@@ -12,6 +12,7 @@ type GameState = {
   status: "waiting" | "finalizing" | "active" | "complete";
   playerCount: number;
   cardCount: number;
+  occupiedCardNumbers: number[];
   prizeAmount: number;
   winners: BingoWinner[];
   selectionEndsAt: string | null;
@@ -25,6 +26,7 @@ function toGameState(row: any): GameState {
     status: row.status === "finished" ? "complete" : row.status === "playing" ? "active" : row.status === "finalizing" ? "finalizing" : "waiting",
     playerCount: Number(row.player_count ?? 0),
     cardCount: Number(row.card_count ?? 0),
+    occupiedCardNumbers: (row.occupied_card_numbers ?? []).map(Number),
     prizeAmount: Number(row.prize_pool ?? 0),
     selectionEndsAt: row.selecting_started_at ? new Date(new Date(row.selecting_started_at).getTime() + 50000).toISOString() : null,
     winners: (row.winners ?? []).map((winner: BingoWinner) => ({
