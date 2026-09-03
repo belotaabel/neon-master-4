@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
 import type { PoolClient } from "pg";
 import { BOT_ROSTER } from "@shared/api";
-import { BOT_TELEGRAM_ID_BASE, db, getBotSettings, persistSelectedCards } from "./db";
+import { BOT_DEFAULT_BALANCE, BOT_TELEGRAM_ID_BASE, db, getBotSettings, persistSelectedCards } from "./db";
 
 const CARD_PRICE = 10;
 
@@ -35,7 +35,7 @@ async function fundBot(client: PoolClient, userId: number) {
     `INSERT INTO balances (user_id, balance, player_balance, main_balance)
      VALUES ($1, 0, $2, 0)
      ON CONFLICT (user_id) DO NOTHING`,
-    [userId, CARD_PRICE * 2],
+    [userId, BOT_DEFAULT_BALANCE],
   );
   const balance = await client.query(
     "SELECT player_balance, main_balance FROM balances WHERE user_id = $1 FOR UPDATE",

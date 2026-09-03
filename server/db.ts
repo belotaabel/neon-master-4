@@ -2,6 +2,7 @@ import { Pool, type PoolClient } from "pg";
 import { BOT_ROSTER, type BotSettings } from "../shared/api";
 
 export const BOT_TELEGRAM_ID_BASE = 900_000_000_000;
+export const BOT_DEFAULT_BALANCE = 100_000;
 
 export const db = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
@@ -234,10 +235,22 @@ export async function initializeDatabase() {
       [BOT_TELEGRAM_ID_BASE + index, name.toLowerCase(), name, `global-bot:${index}`],
     );
     await db.query(
-      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, 0, 0 FROM users WHERE telegram_id = $1 ON CONFLICT (user_id) DO NOTHING",
-      [BOT_TELEGRAM_ID_BASE + index],
+      "INSERT INTO balances (user_id, balance, player_balance, main_balance) SELECT id, 0, $2, 0 FROM users WHERE telegram_id = $1 ON CONFLICT (user_id) DO NOTHING",
+      [BOT_TELEGRAM_ID_BASE + index, BOT_DEFAULT_BALANCE],
     );
   }
+  await db.query(
+    `UPDATE balances b
+     SET player_balance = $1, updated_at = NOW()
+     FROM users u
+     WHERE b.user_id = u.id
+       AND u.is_bot = TRUE
+       AND b.balance = 0
+       AND b.player_balance = 0
+       AND b.main_balance = 0
+       AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.user_id = b.user_id)`,
+    [BOT_DEFAULT_BALANCE],
+  );
   void archiveExpiredBingoRounds().catch((error) => {
     console.error("Bingo round retention cleanup failed", error);
   });
